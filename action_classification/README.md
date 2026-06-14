@@ -61,7 +61,7 @@ Create a deterministic, class-stratified 90/10 train/validation split. The
 official V2 test annotations remain untouched as `test.csv`.
 
 ```bash
-python scripts/prepare_diving48.py --strict
+python scripts/prepare_diving48.py --drop-missing
 ```
 
 This also writes `outputs/data_report.json`. In the supplied V2 annotations, label ID `30` has no samples in either official JSON while IDs still extend to `47`; the project preserves those source IDs and keeps a 48-output head.

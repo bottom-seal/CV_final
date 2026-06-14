@@ -91,6 +91,19 @@ def write_list(
             writer.writerow((relative, label))
 
 
+def partition_missing(
+    records: list[tuple[str, int]],
+    video_dir: Path,
+    video_index: dict[str, Path | None],
+) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
+    present: list[tuple[str, int]] = []
+    missing: list[tuple[str, int]] = []
+    for record in records:
+        target = present if resolve_video(record[0], video_dir, video_index) else missing
+        target.append(record)
+    return present, missing
+
+
 def summarize(records: list[tuple[str, int]]) -> dict[str, Any]:
     counts = Counter(label for _, label in records)
     return {
@@ -108,6 +121,11 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--strict", action="store_true", help="Fail if any referenced video is missing."
+    )
+    parser.add_argument(
+        "--drop-missing",
+        action="store_true",
+        help="Exclude missing video paths from the generated split files.",
     )
     args = parser.parse_args()
     if not 0 <= args.val_fraction < 1:
@@ -130,12 +148,21 @@ def main() -> int:
         print("Validation split is empty; use a positive --val-fraction.", file=sys.stderr)
         return 2
 
-    all_records = train + val + test
     video_index = build_video_index(video_dir)
-    missing = sorted(
-        name
-        for name, _ in all_records
-        if resolve_video(name, video_dir, video_index) is None
+    split_records = {"train": train, "val": val, "test": test}
+    missing_by_split: dict[str, list[tuple[str, int]]] = {}
+    for split, records in split_records.items():
+        present, split_missing = partition_missing(records, video_dir, video_index)
+        missing_by_split[split] = split_missing
+        if args.drop_missing:
+            split_records[split] = present
+
+    train = split_records["train"]
+    val = split_records["val"]
+    test = split_records["test"]
+    missing = sorted(name for records in missing_by_split.values() for name, _ in records)
+    referenced_count = sum(len(records) for records in split_records.values()) + (
+        len(missing) if args.drop_missing else 0
     )
     found_count = len(video_index)
     write_list(args.data_dir / "train.csv", train, video_dir, video_index)
@@ -146,9 +173,13 @@ def main() -> int:
         "seed": args.seed,
         "validation_fraction": args.val_fraction,
         "videos_found": found_count,
-        "referenced_videos": len(all_records),
+        "referenced_videos": referenced_count,
         "missing_video_count": len(missing),
         "missing_videos": missing,
+        "missing_by_split": {
+            split: len(records) for split, records in missing_by_split.items()
+        },
+        "drop_missing": args.drop_missing,
         "splits": {
             "train": summarize(train),
             "val": summarize(val),
@@ -162,8 +193,12 @@ def main() -> int:
     if any(report["splits"][split]["unique_classes"] != 48 for split in report["splits"]):
         print("Warning: at least one split does not contain all 48 classes.", file=sys.stderr)
     if missing:
-        print(f"Warning: {len(missing)} referenced videos are missing.", file=sys.stderr)
-        return 1 if args.strict else 0
+        action = "excluded" if args.drop_missing else "still listed"
+        print(
+            f"Warning: {len(missing)} referenced videos are missing ({action}).",
+            file=sys.stderr,
+        )
+        return 1 if args.strict and not args.drop_missing else 0
     return 0
 
 
