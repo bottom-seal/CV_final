@@ -6,6 +6,17 @@ Diving48. It keeps the official
 OpenGVLab/VideoMAEv2 training path and adds dataset preparation, experiment
 wrappers, W&B logging, and per-video evaluation.
 
+When cloning this project, populate the official repositories and apply the
+small local compatibility patch:
+
+```bash
+git clone --recurse-submodules https://github.com/bottom-seal/CV_final.git
+cd CV_final/action_classification
+git -C VideoMAEv2 apply patches/videomaev2-local.patch
+```
+
+For an existing clone, run `git submodule update --init --recursive` instead.
+
 The included official repositories are pinned at:
 
 - VideoMAE V2: `29eab1e8a588d1b3ec0cdec7b03a86cca491b74b`

@@ -1,0 +1,6 @@
+[submodule "action_classification/VideoMAE"]
+	path = action_classification/VideoMAE
+	url = https://github.com/MCG-NJU/VideoMAE.git
+[submodule "action_classification/VideoMAEv2"]
+	path = action_classification/VideoMAEv2
+	url = https://github.com/OpenGVLab/VideoMAEv2.git
