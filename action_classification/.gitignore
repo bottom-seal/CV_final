@@ -1,5 +1,8 @@
-# Datasets and extracted media
-/data/
+# Datasets and extracted media.
+# Track directory placeholders only; ignore all actual contents.
+/data/**
+!/data/**/
+!/data/**/.gitkeep
 *.mp4
 *.avi
 *.mkv
@@ -10,10 +13,15 @@
 *.zip
 *.7z
 
-# Model weights and generated artifacts
-/checkpoints/
-/outputs/
-/wandb/
+# Model weights and generated artifacts.
+# Track directory placeholders only; ignore all actual contents.
+/checkpoints/**
+!/checkpoints/.gitkeep
+/outputs/**
+!/outputs/**/
+!/outputs/**/.gitkeep
+/wandb/**
+!/wandb/.gitkeep
 *.pth
 *.pt
 *.ckpt
