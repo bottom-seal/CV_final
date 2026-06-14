@@ -1,0 +1,37 @@
+experiment:
+  name: linear_probe_videomaev2_base
+paths:
+  data: data/diving48
+  checkpoint: checkpoints/videomaev2_base.pth
+  output: outputs/runs/linear_probe_videomaev2_base
+model:
+  architecture: vit_base_patch16_224
+  pretrained: true
+  freeze_mode: linear
+  unfreeze_last_blocks: 0
+training:
+  seed: 42
+  epochs: 20
+  batch_size: auto
+  learning_rate: 1.0e-3
+  min_learning_rate: 1.0e-6
+  warmup_learning_rate: 1.0e-8
+  warmup_epochs: 3
+  weight_decay: 0.05
+  layer_decay: 1.0
+  drop_path: 0.0
+  clip_grad: 5.0
+  num_frames: 16
+  sampling_rate: 4
+  repeated_samples: 1
+  save_checkpoint_frequency: 1
+evaluation:
+  num_segments: 1
+  num_crops: 1
+logging:
+  wandb_project: videomaev2-diving48
+  wandb_run_name: linear_probe_videomaev2_base
+  wandb_mode: online
+system:
+  gpus: "0"
+  num_workers: 8

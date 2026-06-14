@@ -1,0 +1,296 @@
+diff --git a/dataset/datasets.py b/dataset/datasets.py
+index 097c48d..1ea05c0 100644
+--- a/dataset/datasets.py
++++ b/dataset/datasets.py
+@@ -166,8 +166,8 @@ class VideoClsDataset(Dataset):
+ 
+             if self.sparse_sample:
+                 spatial_step = 1.0 * (max(buffer.shape[1], buffer.shape[2]) -
+-                                      self.short_side_size) / (
+-                                          self.test_num_crop - 1)
++                                      self.short_side_size) / max(
++                                          self.test_num_crop - 1, 1)
+                 temporal_start = chunk_nb
+                 spatial_start = int(split_nb * spatial_step)
+                 if buffer.shape[1] >= buffer.shape[2]:
+@@ -180,11 +180,11 @@ class VideoClsDataset(Dataset):
+                                     self.short_side_size, :]
+             else:
+                 spatial_step = 1.0 * (max(buffer.shape[1], buffer.shape[2]) -
+-                                      self.short_side_size) / (
+-                                          self.test_num_crop - 1)
++                                      self.short_side_size) / max(
++                                          self.test_num_crop - 1, 1)
+                 temporal_step = max(
+                     1.0 * (buffer.shape[0] - self.clip_len) /
+-                    (self.test_num_segment - 1), 0)
++                    max(self.test_num_segment - 1, 1), 0)
+                 temporal_start = int(chunk_nb * temporal_step)
+                 spatial_start = int(split_nb * spatial_step)
+                 if buffer.shape[1] >= buffer.shape[2]:
+diff --git a/run_class_finetuning.py b/run_class_finetuning.py
+index 87ba1c7..cfcc68b 100644
+--- a/run_class_finetuning.py
++++ b/run_class_finetuning.py
+@@ -16,7 +16,10 @@ from collections import OrderedDict
+ from functools import partial
+ from pathlib import Path
+ 
+-import deepspeed
++try:
++    import deepspeed
++except ImportError:
++    deepspeed = None
+ import numpy as np
+ import torch
+ import torch.backends.cudnn as cudnn
+@@ -153,6 +156,10 @@ def get_args():
+         metavar='LR',
+         help='learning rate (default: 1e-3)')
+     parser.add_argument('--layer_decay', type=float, default=0.75)
++    parser.add_argument(
++        '--no_lr_scale',
++        action='store_true',
++        help='Use learning-rate arguments literally instead of scaling by batch_size / 256.')
+ 
+     parser.add_argument(
+         '--warmup_lr',
+@@ -284,6 +291,16 @@ def get_args():
+     parser.add_argument('--model_key', default='model|module', type=str)
+     parser.add_argument('--model_prefix', default='', type=str)
+     parser.add_argument('--init_scale', default=0.001, type=float)
++    parser.add_argument(
++        '--freeze_mode',
++        choices=['full', 'linear', 'partial'],
++        default='full',
++        help='Train all parameters, only the head, or the last N blocks plus head.')
++    parser.add_argument(
++        '--unfreeze_last_blocks',
++        default=4,
++        type=int,
++        help='Final transformer blocks to train with --freeze_mode partial.')
+     parser.add_argument('--use_mean_pooling', action='store_true')
+     parser.set_defaults(use_mean_pooling=True)
+     parser.add_argument(
+@@ -391,10 +408,19 @@ def get_args():
+ 
+     parser.add_argument(
+         '--enable_deepspeed', action='store_true', default=False)
++    parser.add_argument('--wandb_project', default='', type=str)
++    parser.add_argument('--wandb_run_name', default='', type=str)
++    parser.add_argument('--wandb_group', default='', type=str)
++    parser.add_argument(
++        '--wandb_mode',
++        choices=['online', 'offline', 'disabled'],
++        default='online')
+ 
+     known_args, _ = parser.parse_known_args()
+ 
+     if known_args.enable_deepspeed:
++        if deepspeed is None:
++            parser.error('--enable_deepspeed requires: pip install deepspeed')
+         parser = deepspeed.add_config_arguments(parser)
+         ds_init = deepspeed.initialize
+     else:
+@@ -411,6 +437,31 @@ def main(args, ds_init):
+ 
+     print(args)
+ 
++    wandb_run = None
++    if args.wandb_project and utils.is_main_process():
++        try:
++            import wandb
++        except ImportError as exc:
++            raise RuntimeError(
++                'W&B logging requested but wandb is not installed.') from exc
++        wandb_run = wandb.init(
++            project=args.wandb_project,
++            name=args.wandb_run_name or None,
++            group=args.wandb_group or None,
++            mode=args.wandb_mode,
++            config=vars(args),
++            dir=args.output_dir or None)
++        train_labels = np.loadtxt(
++            os.path.join(args.data_path, "train.csv"),
++            dtype=str,
++            usecols=1,
++            ndmin=1).astype(int)
++        class_counts = np.bincount(train_labels, minlength=48)
++        wandb_run.summary["train_class_distribution"] = {
++            str(index): int(count)
++            for index, count in enumerate(class_counts)
++        }
++
+     device = torch.device(args.device)
+ 
+     # fix the seed for reproducibility
+@@ -452,6 +503,7 @@ def main(args, ds_init):
+             shuffle=False)
+     else:
+         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
++        sampler_test = torch.utils.data.SequentialSampler(dataset_test)
+ 
+     if global_rank == 0 and args.log_dir is not None:
+         os.makedirs(args.log_dir, exist_ok=True)
+@@ -472,7 +524,7 @@ def main(args, ds_init):
+         pin_memory=args.pin_mem,
+         drop_last=True,
+         collate_fn=collate_func,
+-        persistent_workers=True)
++        persistent_workers=args.num_workers > 0)
+ 
+     if dataset_val is not None:
+         data_loader_val = torch.utils.data.DataLoader(
+@@ -482,7 +534,7 @@ def main(args, ds_init):
+             num_workers=args.num_workers,
+             pin_memory=args.pin_mem,
+             drop_last=False,
+-            persistent_workers=True)
++            persistent_workers=args.num_workers > 0)
+     else:
+         data_loader_val = None
+ 
+@@ -494,7 +546,7 @@ def main(args, ds_init):
+             num_workers=args.num_workers,
+             pin_memory=args.pin_mem,
+             drop_last=False,
+-            persistent_workers=True)
++            persistent_workers=args.num_workers > 0)
+     else:
+         data_loader_test = None
+ 
+@@ -671,6 +723,26 @@ def main(args, ds_init):
+         utils.load_state_dict(
+             model, checkpoint_model, prefix=args.model_prefix)
+ 
++    if args.freeze_mode == 'linear':
++        for parameter in model.parameters():
++            parameter.requires_grad = False
++        for parameter in model.head.parameters():
++            parameter.requires_grad = True
++    elif args.freeze_mode == 'partial':
++        if not 0 < args.unfreeze_last_blocks <= len(model.blocks):
++            raise ValueError(
++                f'--unfreeze_last_blocks must be in [1, {len(model.blocks)}]')
++        for parameter in model.parameters():
++            parameter.requires_grad = False
++        for block in model.blocks[-args.unfreeze_last_blocks:]:
++            for parameter in block.parameters():
++                parameter.requires_grad = True
++        for module_name in ('fc_norm', 'norm', 'head_dropout', 'head'):
++            module = getattr(model, module_name, None)
++            if module is not None:
++                for parameter in module.parameters():
++                    parameter.requires_grad = True
++
+     model.to(device)
+ 
+     model_ema = None
+@@ -686,17 +758,24 @@ def main(args, ds_init):
+     model_without_ddp = model
+     n_parameters = sum(p.numel() for p in model.parameters()
+                        if p.requires_grad)
++    total_parameters = sum(p.numel() for p in model.parameters())
+ 
+     print("Model = %s" % str(model_without_ddp))
+     print('number of params:', n_parameters)
++    print('total params:', total_parameters)
++    print('freeze mode:', args.freeze_mode)
++    if wandb_run is not None:
++        wandb_run.config.update({
++            'trainable_params': n_parameters,
++            'total_params': total_parameters,
++        })
+ 
+     total_batch_size = args.batch_size * args.update_freq * num_tasks
+     num_training_steps_per_epoch = len(dataset_train) // total_batch_size
+-    args.lr = args.lr * total_batch_size / 256
+-    #########scale the lr#############
+-    args.min_lr = args.min_lr * total_batch_size / 256
+-    args.warmup_lr = args.warmup_lr * total_batch_size / 256
+-    #########scale the lr#############
++    if not args.no_lr_scale:
++        args.lr = args.lr * total_batch_size / 256
++        args.min_lr = args.min_lr * total_batch_size / 256
++        args.warmup_lr = args.warmup_lr * total_batch_size / 256
+     print("LR = %.8f" % args.lr)
+     print("Batch size = %d" % total_batch_size)
+     print("Update frequent = %d" % args.update_freq)
+@@ -790,12 +869,16 @@ def main(args, ds_init):
+         print(
+             f"{len(dataset_val)} val images: Top-1 {test_stats['acc1']:.2f}%, Top-5 {test_stats['acc5']:.2f}%, loss {test_stats['loss']:.4f}"
+         )
+-        exit(0)
++        if wandb_run is not None:
++            wandb_run.log(test_stats)
++            wandb_run.finish()
++        return
+ 
+     if args.eval:
+         preds_file = os.path.join(args.output_dir, str(global_rank) + '.txt')
+         test_stats = final_test(data_loader_test, model, device, preds_file)
+-        torch.distributed.barrier()
++        if utils.is_dist_avail_and_initialized():
++            torch.distributed.barrier()
+         if global_rank == 0:
+             print("Start merging results...")
+             final_top1, final_top5 = merge(args.output_dir, num_tasks)
+@@ -809,7 +892,13 @@ def main(args, ds_init):
+                         mode="a",
+                         encoding="utf-8") as f:
+                     f.write(json.dumps(log_stats) + "\n")
+-        exit(0)
++        if wandb_run is not None:
++            wandb_run.log({
++                'test/top1': final_top1,
++                'test/top5': final_top5,
++            })
++            wandb_run.finish()
++        return
+ 
+     print(f"Start training for {args.epochs} epochs")
+     start_time = time.time()
+@@ -888,6 +977,8 @@ def main(args, ds_init):
+                    for k, v in train_stats.items()}, 'epoch': epoch,
+                 'n_parameters': n_parameters
+             }
++        if wandb_run is not None:
++            wandb_run.log(log_stats, step=epoch)
+         if args.output_dir and utils.is_main_process():
+             if log_writer is not None:
+                 log_writer.flush()
+@@ -899,7 +990,8 @@ def main(args, ds_init):
+ 
+     preds_file = os.path.join(args.output_dir, str(global_rank) + '.txt')
+     test_stats = final_test(data_loader_test, model, device, preds_file)
+-    torch.distributed.barrier()
++    if utils.is_dist_avail_and_initialized():
++        torch.distributed.barrier()
+ 
+     if global_rank == 0:
+         print("Start merging results...")
+@@ -918,6 +1010,11 @@ def main(args, ds_init):
+     total_time = time.time() - start_time
+     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+     print('Training time {}'.format(total_time_str))
++    if wandb_run is not None:
++        wandb_run.summary['best_val_top1'] = max_accuracy
++        wandb_run.summary['final_top1'] = final_top1
++        wandb_run.summary['final_top5'] = final_top5
++        wandb_run.finish()
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/utils.py b/utils.py
+index 8132f19..9e2c9b6 100644
+--- a/utils.py
++++ b/utils.py
+@@ -482,6 +482,8 @@ def save_model(args,
+                 to_save['model_ema'] = get_state_dict(model_ema)
+ 
+             save_on_master(to_save, checkpoint_path)
++            if isinstance(epoch, int):
++                save_on_master(to_save, output_dir / 'checkpoint-latest.pth')
+     else:
+         client_state = {'epoch': epoch}
+         if model_ema is not None:

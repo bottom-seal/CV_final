@@ -1,0 +1,19 @@
+# Install PyTorch separately with scripts/setup_env.sh so the correct CUDA wheel is used.
+av>=12.0
+decord>=0.6.0
+einops>=0.7
+gdown>=5.2
+huggingface_hub>=0.23
+matplotlib>=3.8
+numpy>=1.26,<2
+opencv-python>=4.9
+pandas>=2.1
+Pillow>=10.0
+PyYAML>=6.0
+scikit-learn>=1.4
+scipy>=1.11
+tensorboard>=2.16
+tensorboardX>=2.6
+timm==0.4.12
+wandb>=0.17
+

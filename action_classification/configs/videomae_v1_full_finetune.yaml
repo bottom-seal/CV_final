@@ -1,0 +1,48 @@
+experiment:
+  name: full_finetune_videomae_v1_base
+  method: VideoMAE V1 Base full fine-tune
+  pretraining_source: Kinetics-400 masked autoencoding, 800 epochs
+
+paths:
+  data: data/diving48
+  checkpoint: checkpoints/videomae_v1_base_k400_800e.pth
+  output: outputs/runs/full_finetune_videomae_v1_base
+
+model:
+  architecture: vit_base_patch16_224
+  family: videomae_v1
+  pretrained: true
+  freeze_mode: full
+  unfreeze_last_blocks: 4
+
+training:
+  seed: 42
+  epochs: 40
+  # Same effective batch and optimization as the tuned V2 comparison run.
+  batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 6.0e-5
+  min_learning_rate: 1.0e-6
+  warmup_learning_rate: 1.0e-8
+  warmup_epochs: 5
+  weight_decay: 0.05
+  layer_decay: 0.75
+  drop_path: 0.1
+  clip_grad: 5.0
+  num_frames: 16
+  sampling_rate: 4
+  repeated_samples: 1
+  save_checkpoint_frequency: 5
+
+evaluation:
+  num_segments: 3
+  num_crops: 1
+
+logging:
+  wandb_project: videomaev2-diving48
+  wandb_run_name: full_finetune_videomae_v1_base
+  wandb_mode: online
+
+system:
+  gpus: "0"
+  num_workers: 8

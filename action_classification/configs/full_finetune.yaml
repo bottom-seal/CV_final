@@ -1,0 +1,41 @@
+experiment:
+  name: full_finetune_videomaev2_base
+paths:
+  data: data/diving48
+  checkpoint: checkpoints/videomaev2_base.pth
+  output: outputs/runs/full_finetune_videomaev2_base
+model:
+  architecture: vit_base_patch16_224
+  pretrained: true
+  freeze_mode: full
+  unfreeze_last_blocks: 4
+training:
+  seed: 42
+  epochs: 40
+  # Effective batch size = 2 x 8 = 16; chosen to fit a 16 GB RTX 4080 SUPER.
+  batch_size: 2
+  gradient_accumulation_steps: 8
+  # Matches the official batch-scaled recipe closely for effective batch 16.
+  learning_rate: 6.0e-5
+  min_learning_rate: 1.0e-6
+  warmup_learning_rate: 1.0e-8
+  warmup_epochs: 5
+  weight_decay: 0.05
+  layer_decay: 0.75
+  drop_path: 0.1
+  clip_grad: 5.0
+  num_frames: 16
+  sampling_rate: 4
+  repeated_samples: 1
+  save_checkpoint_frequency: 5
+evaluation:
+  # Cheaper validation during training; use 5x3 with scripts/eval.sh for the report.
+  num_segments: 3
+  num_crops: 1
+logging:
+  wandb_project: videomaev2-diving48
+  wandb_run_name: full_finetune_videomaev2_base
+  wandb_mode: online
+system:
+  gpus: "0"
+  num_workers: 8

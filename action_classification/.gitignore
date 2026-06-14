@@ -1,0 +1,48 @@
+# Datasets and extracted media
+/data/
+*.mp4
+*.avi
+*.mkv
+*.webm
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+
+# Model weights and generated artifacts
+/checkpoints/
+/outputs/
+/wandb/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+*.npy
+*.npz
+
+# Logs and experiment trackers
+*.log
+events.out.tfevents.*
+
+# Python environments and caches
+/.venv/
+.env
+.env.*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Editors and operating-system metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary downloads and files
+*.part
+*.tmp
+*.swp
+*~
